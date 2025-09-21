@@ -1,1 +1,132 @@
+import pandas as pd
+from Levenshtein import distance as levenshtein_distance
+import re
 
+def clean_domain(domain):
+    """
+    Cleans the domain string to ensure a fair comparison.
+    - Removes common prefixes like 'www.'
+    - Removes top-level domains like '.com', '.net', '.org', etc. for a more focused comparison on the brand name.
+    - Removes special characters and converts to lowercase.
+    """
+    domain = str(domain).lower().strip()
+    domain = re.sub(r'^(www\.|l1\.|lt08\.|mx03\.|now5\.|totalise\.|reply2\.|egwn\.|insurancemail\.|witty\.|bigfoot\.|frugaljoe\.|asiamagic\.|flashmail\.|verizonmail\.|superdada\.|virtual-mail\.|planetinternet\.|emailaccount\.|comprosys\.|abptrade\.|close2you\.|meishi\.|insurancemail\.|insurancemail\.|email\.is\.|insurancemail\.|insurancemail\.|insiq\.|insiq\.|insiq\.|insiq\.|hotmail\.)', '', domain, flags=re.IGNORECASE)
+    domain = re.sub(r'\.\w{2,4}$', '', domain)  # Remove TLD
+    domain = re.sub(r'[\W_]+', '', domain)  # Remove special characters
+    return domain
+
+def check_spoofing_with_edit_distance(dataset_path, legitimate_domains, threshold=2):
+    """
+    Analyzes a dataset of emails to detect potential domain spoofing using edit distance.
+
+    Args:
+        dataset_path (str): The path to the CSV file containing email data.
+        legitimate_domains (list): A list of known, trusted domain names (brand names) to compare against.
+        threshold (int): The maximum allowed edit distance for a domain to be flagged as a potential spoof.
+                         A lower number is more sensitive to small changes.
+    """
+    try:
+        # Load the dataset
+        df = pd.read_excel(dataset_path)
+
+        # Filter for phishing emails only to focus the analysis
+        phishing_emails = df[df['y'] == 1].copy()
+
+        # Create new columns for the analysis results
+        phishing_emails['spoof_flag'] = False
+        phishing_emails['closest_legit_domain'] = None
+        phishing_emails['min_edit_distance'] = float('inf')
+
+        # Clean legitimate domains once
+        cleaned_legit_domains = [clean_domain(d) for d in legitimate_domains]
+        cleaned_legit_domains = [d for d in cleaned_legit_domains if d] # Remove empty strings
+
+        # Iterate over each phishing email to perform the check
+        for index, row in phishing_emails.iterrows():
+            sender_domain = row['from_domain']
+            url_domains = row['url_domains']
+            
+            # Use sender domain from the "from_domain" column
+            if pd.notna(sender_domain):
+                cleaned_sender = clean_domain(sender_domain)
+                
+                # Compare the sender's domain with each legitimate domain
+                for legit_domain in cleaned_legit_domains:
+                    if not cleaned_sender or not legit_domain:
+                        continue
+                    
+                    dist = levenshtein_distance(cleaned_sender, legit_domain)
+                    
+                    # Update if this is the closest match found so far
+                    if dist < phishing_emails.loc[index, 'min_edit_distance']:
+                        phishing_emails.loc[index, 'min_edit_distance'] = dist
+                        phishing_emails.loc[index, 'closest_legit_domain'] = legit_domain
+                        
+                        # Flag as spoof if the distance is within the threshold
+                        if dist <= threshold:
+                            phishing_emails.loc[index, 'spoof_flag'] = True
+                
+            # Perform a similar check for URL domains if available
+            if pd.notna(url_domains):
+                # The URL list is a string representation of a Python list, so we need to parse it
+                try:
+                    # Safely evaluate the string to a list
+                    url_domain_list = eval(url_domains)
+                    
+                    if url_domain_list and isinstance(url_domain_list, list):
+                        for url_domain in url_domain_list:
+                            cleaned_url_domain = clean_domain(url_domain)
+                            
+                            for legit_domain in cleaned_legit_domains:
+                                if not cleaned_url_domain or not legit_domain:
+                                    continue
+                                
+                                dist = levenshtein_distance(cleaned_url_domain, legit_domain)
+                                
+                                if dist < phishing_emails.loc[index, 'min_edit_distance']:
+                                    phishing_emails.loc[index, 'min_edit_distance'] = dist
+                                    phishing_emails.loc[index, 'closest_legit_domain'] = legit_domain
+                                    
+                                    if dist <= threshold:
+                                        phishing_emails.loc[index, 'spoof_flag'] = True
+                except (SyntaxError, TypeError):
+                    print(f"Could not parse URL domain list for index {index}. Skipping.")
+                    
+        # Filter for only the flagged potential spoofs
+        spoofed_emails = phishing_emails[phishing_emails['spoof_flag']]
+        
+        if not spoofed_emails.empty:
+            print(f"Potential spoofing emails detected (edit distance threshold <= {threshold}):")
+            print("-" * 80)
+            
+            # Print the relevant details for the detected spoofs
+            for _, row in spoofed_emails.iterrows():
+                print(f"Subject: {row['subject_clean']}")
+                print(f"Original Domain: {row['from_domain']} / URL Domain: {row['url_domains']}")
+                print(f"Potential Brand Spoof: {row['closest_legit_domain']} (Edit Distance: {int(row['min_edit_distance'])})")
+                print("-" * 80)
+        else:
+            print("No potential spoofing emails detected with the current settings.")
+            
+    except FileNotFoundError:
+        print(f"Error: The file at '{dataset_path}' was not found. Please check the file name and path.")
+    except Exception as e:
+        print(f"An error occurred: {e}")
+
+# Example Usage:
+if __name__ == "__main__":
+    
+    # Define a list of known legitimate domains to compare against.
+    # Note: These should be brand names or core domain parts.
+    legitimate_domains = [
+        'aol', 'msn', 'yahoo', 'google', 'hotmail', 'amazon',
+        'paypal', 'ebay', 'microsoft', 'apple', 'norton', 'hp', 'netflix',
+        'wikipedia', 'youtube', 'facebook', 'twitter', 'linkedin',
+        'cnet', 'zdnet', 'hertz', 'ryanair', 'intel'
+    ]
+
+    # Set the path to your Excel file
+    excel_file_path = 'Phishing data sheet.xlsx'
+    
+    # Run the detection function
+    check_spoofing_with_edit_distance(excel_file_path, legitimate_domains, threshold=2)
