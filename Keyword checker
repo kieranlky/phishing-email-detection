@@ -1,0 +1,74 @@
+import re #tool to help us spot words using patterns
+import pandas as pd #tool to help us read and handle tables
+
+CSV_PATH = "emails_clean_350_updated2.xlsx" #name of file we want to read
+keywords = {"urgent","verify","password", "confirm", "account", "suspend", "update"} #words to look for in the email subject/body
+
+subject_weight = 0.60 #how much weight to give to subject line
+body_weight = 0.40 #how much weight to give to body of email
+early_window = 35.0 #how big the "early" part of the body is (smaller means earlier matters more)
+threshold = 0.55 #if the total score is this number of bigger, we call it "keyword_flagged"
+
+_word_re = re.compile(r"[A-Za-z0-9']+") #pattern to spot words
+
+def tokens(text: str):
+    return _word_re.findall((text or "").lower()) #find all words in the text, make them lowercase
+
+def earliest_position(body_tokens, keywords):
+    keywds = set(k.lower for k in keywords) #make keywords lowercase
+    for i, t in enumerate(body_tokens): #look at each word in the body
+        if t in keywds: #if it's a keyword
+            return i #return its position
+        
+def score_email(subject_text: str, body_text:str): #this will work to give the mail a score from 0-1, bigger means "more suspicious by keywords"
+    s_tokens = tokens(subject_text) #get words in subject
+    b_tokens = tokens(body_text) #get words in body 
+
+    subject_hit = any(t in keywords for t in s_tokens) #see if any subject words are keywords, True(1) if subject has keyword
+    pos = earliest_position(b_tokens, keywords) #get position of earliest keyword in body
+
+    body_signal = 0.0 if pos is None else max(0.0, 1.0  - (pos/early_window)) #calculate body signal based on position of earliest keyword
+    score = subject_weight * float(subject_hit) + body_weight * body_signal
+    return min(1.0, max(0.0, score)), subject_hit, (pos if pos is not None else -1) #combine subject and body signals into a final score, make sure it's between 0 and 1
+
+df = pd.read_excel(CSV_PATH) #read the table of emails from the xlsx file
+
+subj_col = "subject_clean" if "subject_clean" in df.columns else "subject"
+body_col = "body_clean" if "body_clean" in df.columns else "body"
+
+df[subj_col] = df[subj_col].fillna("") #make sure there are no missing subjects, so code does not break
+df[body_col] = df[body_col].fillna("") #make sure there are no missing bodies, so code does not break
+
+scores, subject_hits, body_first_pos = [], [], [] #lists to hold results
+for s, b in zip(df[subj_col], df[body_col]):
+    sc, s_hit, pos = score_email(s,b)
+    scores.append(sc) #remember the score
+    subject_hits.append(int(s_hit)) #remember if subject had key word
+    body_first_pos.append(pos) #remember where key word was positioned
+
+df["keyword_score"] = scores
+df["keyword_flag"] = (df["keyword_score"]>=threshold).astype(int) #1 if score is high enough
+df["kw_subject_hit"] = subject_hits #1 if subject had a magic word
+df["kw_body_firstpos"] = body_first_pos #where the first magic word in the body appears
+
+
+print("Examples of flagged emails (top 10 by score):")
+cols = [subj_col,"keyword_score", "kw_subject_hit", "kw_body_firstpos"]
+counts = df["keyword_flag"].value_counts().sort_index() # how many were flagged and how many not
+top10 = df[df["keyword_flag"]==1][cols].sort_values("keyword_score", ascending=False).head(10).to_string(index=False)
+
+if "y" in df.columns:
+    crosstab = pd.crosstab(df["y"], df["keyword_flag"], 
+                           rownames=["y"], colnames=["Keyword Flag"])
+    
+output = f"""
+Counts by keyword_flag (1 = suspicious by keywords):
+{counts}
+
+Examples of flagged emails (top 10 by score):
+{top10}
+
+{f"Cross-tab with ground truth (y):\n{crosstab}" if crosstab is not None else ""}
+"""
+
+print(output)
