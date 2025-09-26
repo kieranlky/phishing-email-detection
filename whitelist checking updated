@@ -1,0 +1,30 @@
+import pandas as pd
+
+# Load the dataset (adjust path as needed)
+dataset = pd.read_excel('emails_cleaned_350_updated2.xlsx')  # Replace with your file path
+
+# Load the safe domains from the Excel file
+excel_file_safe = 'safe_domains.xlsx'
+safe_domains_df = pd.read_excel(excel_file_safe)
+
+# Assuming the safe domains are in the first column of the Excel file
+safe_domains = safe_domains_df.iloc[:, 0].tolist()
+
+# Function to check if an email domain is in the whitelist
+def whitelist_check(email, safe_domains):
+    domain = email.split('@')[-1]
+    return 1 if domain in safe_domains else 0
+
+# Function to apply whitelist check
+def apply_whitelist_check(row, safe_domains):
+    sender_domain = row['from_domain']  # Extract the 'from_domain' column from the dataset
+    return whitelist_check(sender_domain, safe_domains)
+
+# Apply the whitelist check to the dataset
+dataset['whitelist_risk_score'] = dataset.apply(apply_whitelist_check, axis=1, safe_domains=safe_domains)
+
+# Show the results with the sender domain and the new whitelist risk score
+print(dataset[['from_domain', 'whitelist_risk_score']].head())
+
+print("\nAvailable columns in the dataset:")
+print(dataset.columns)
