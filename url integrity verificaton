@@ -1,0 +1,56 @@
+import pandas as pd 
+import re
+df = pd.read_excel('c:\Python project\emails_clean_350_updated2.xlsx')
+def is_ip_url(url):
+    # Regex to match URLs with IP addresses
+    ip_pattern = r'https?://(?:\d{1,3}\.){3}\d{1,3}(?:[:/]|$)'
+    return bool(re.search(ip_pattern, url))
+
+df['phishing'] = df['url_list'].apply(lambda x: 'PHISHING' if is_ip_url(str(x)) else 'SAFE')
+df['columns_match'] = df['phishing'] == df['Phishing?']
+print(df['columns_match'].value_counts())
+def has_encoded_or_hidden_link(text):
+    # Check for percent-encoded URLs (e.g., %2F, %3A)
+    encoded_pattern = r'%[0-9A-Fa-f]{2}'
+    # Check for HTML anchor tags with href
+    hidden_link_pattern = r'<a\s+href=["\'].*?["\'].*?>.*?</a>'
+    return bool(re.search(encoded_pattern, str(text))) or bool(re.search(hidden_link_pattern, str(text)))
+
+df['encoded_or_hidden_url'] = df.apply(
+    lambda row: has_encoded_or_hidden_link(row['url_list']) or has_encoded_or_hidden_link(row['body_clean']),
+    axis=1
+)
+
+# Classify as phishing if IP URL or encoded/hidden link is found
+df['phishing'] = df.apply(
+    lambda row: 'PHISHING' if (is_ip_url(str(row['url_list'])) or row['encoded_or_hidden_url']) else 'SAFE',
+    axis=1
+)
+
+df['columns_match'] = df['phishing'] == df['Phishing?']
+print(df['columns_match'].value_counts())
+# Check for hidden or encoded links in 'body_clean' and 'url_list' columns
+df['body_has_encoded_or_hidden'] = df['body_clean'].apply(has_encoded_or_hidden_link)
+df['url_has_encoded_or_hidden'] = df['url_list'].apply(has_encoded_or_hidden_link)
+
+print("Rows with encoded or hidden links in body_clean:", df['body_has_encoded_or_hidden'].sum())
+print("Rows with encoded or hidden links in url_list:", df['url_has_encoded_or_hidden'].sum())
+def anchor_text_mismatch(text):
+    # Find all anchor tags with href
+    anchor_pattern = r'<a\s+href=["\'](https?://[^"\']+)["\'][^>]*>(.*?)</a>'
+    mismatches = []
+    for match in re.finditer(anchor_pattern, str(text), re.IGNORECASE | re.DOTALL):
+        url = match.group(1)
+        anchor_text = match.group(2)
+        # Extract domain from URL
+        domain_match = re.search(r'https?://([^/]+)', url)
+        domain = domain_match.group(1) if domain_match else ''
+        # Check if anchor text looks like a domain and doesn't match destination domain
+        anchor_domain_match = re.search(r'([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})', anchor_text)
+        anchor_domain = anchor_domain_match.group(1) if anchor_domain_match else ''
+        if anchor_domain and anchor_domain.lower() != domain.lower():
+            mismatches.append((anchor_text, domain))
+    return len(mismatches) > 0
+
+df['body_anchor_mismatch'] = df['body_clean'].apply(anchor_text_mismatch)
+print("Rows with mismatched anchor text/domain in body_clean:", df['body_anchor_mismatch'].sum())
