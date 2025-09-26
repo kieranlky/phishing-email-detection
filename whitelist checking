@@ -1,0 +1,56 @@
+import pandas as pd
+
+# Load the dataset (adjust path as needed)
+dataset = pd.read_csv('emails.csv')  # Replace with your file path
+
+# Load the safe domains from the Excel file
+excel_file_safe = 'safe_domains (1).xlsx'
+safe_domains_df = pd.read_excel(excel_file_safe)
+
+# Assuming the safe domains are in the first column of the Excel file
+safe_domains = safe_domains_df.iloc[:, 0].tolist()
+
+# Function to check if an email domain is in the whitelist
+def whitelist_check(email, safe_domains):
+    domain = email.split('@')[-1]
+    return 1 if domain in safe_domains else 0
+
+# Function to apply whitelist check
+def apply_whitelist_check(row, safe_domains):
+    sender_email = row['from']
+    return whitelist_check(sender_email, safe_domains)
+
+# Apply the whitelist check to the dataset
+dataset['whitelist_risk_score'] = dataset.apply(apply_whitelist_check, axis=1, safe_domains=safe_domains)
+
+# Load the unsafe domains from the Excel file (replace 'unsafe_domains.xlsx' with your filename)
+# Make sure to upload the unsafe domains file first
+# excel_file_unsafe = 'unsafe_domains.xlsx' # Replace with your file path
+# unsafe_domains_df = pd.read_excel(excel_file_unsafe)
+
+# Assuming the unsafe domains are in the first column of the Excel file
+# unsafe_domains = unsafe_domains_df.iloc[:, 0].tolist()
+
+# For now, using a placeholder list of unsafe domains
+unsafe_domains = ['bad-domain.com', 'scam.net']
+
+
+# Function to check if an email domain is in the blacklist
+def blacklist_check(email, unsafe_domains):
+    domain = email.split('@')[-1]
+    return 1 if domain in unsafe_domains else 0
+
+# Function to apply blacklist check
+def apply_blacklist_check(row, unsafe_domains):
+    sender_email = row['from']
+    return blacklist_check(sender_email, unsafe_domains)
+
+# Apply the blacklist check to the dataset
+dataset['blacklist_risk_score'] = dataset.apply(apply_blacklist_check, axis=1, unsafe_domains=unsafe_domains)
+
+
+# Show the results with the new blacklist risk score
+print(dataset[['Subject', 'from', 'whitelist_risk_score', 'blacklist_risk_score']].head())
+
+print("\nAvailable columns in the dataset:")
+print(dataset.columns)
