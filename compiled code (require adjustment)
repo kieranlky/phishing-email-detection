@@ -23,14 +23,15 @@ def apply_whitelist_check(row, safe_domains):
     sender_domain = row['from_domain']  # Extract the 'from_domain' column from the dataset
     return whitelist_check(sender_domain, safe_domains)
 
-# Apply the whitelist check to the dataset
-dataset['whitelist_risk_score'] = dataset.apply(apply_whitelist_check, axis=1, safe_domains=safe_domains)
+
+# Apply the whitelist check to the DataFrame
+df['whitelist_risk_score'] = df.apply(apply_whitelist_check, axis=1, safe_domains=safe_domains)
 
 # Show the results with the sender domain and the new whitelist risk score
-print(dataset[['from_domain', 'whitelist_risk_score']].head())
+print(df[['from_domain', 'whitelist_risk_score']].head())
 
 print("\nAvailable columns in the dataset:")
-print(dataset.columns)
+print(df.columns)
 
 import re #tool to help us spot words using patterns
 import pandas as pd #tool to help us read and handle tables
@@ -49,7 +50,7 @@ def tokens(text: str):
     return _word_re.findall((text or "").lower()) #find all words in the text, make them lowercase
 
 def earliest_position(body_tokens, keywords):
-    keywds = set(k.lower for k in keywords) #make keywords lowercase
+    keywds = set(k.lower() for k in keywords) #make keywords lowercase
     for i, t in enumerate(body_tokens): #look at each word in the body
         if t in keywds: #if it's a keyword
             return i #return its position
@@ -88,22 +89,25 @@ df["kw_body_firstpos"] = body_first_pos #where the first magic word in the body 
 
 print("Examples of flagged emails (top 10 by score):")
 cols = [subj_col,"keyword_score", "kw_subject_hit", "kw_body_firstpos"]
+
 counts = df["keyword_flag"].value_counts().sort_index() # how many were flagged and how many not
 top10 = df[df["keyword_flag"]==1][cols].sort_values("keyword_score", ascending=False).head(10).to_string(index=False)
 
+crosstab = None
 if "y" in df.columns:
     crosstab = pd.crosstab(df["y"], df["keyword_flag"], 
                            rownames=["y"], colnames=["Keyword Flag"])
-    
+
+
 output = f"""
 Counts by keyword_flag (1 = suspicious by keywords):
 {counts}
 
 Examples of flagged emails (top 10 by score):
 {top10}
-
-{f"Cross-tab with ground truth (y):\n{crosstab}" if crosstab is not None else ""}
 """
+if crosstab is not None:
+    output += f"\nCross-tab with ground truth (y):\n{crosstab}"
 
 print(output)
 
@@ -530,4 +534,3 @@ else:
     if len(idxs) > 0:
         show_rule_email(int(idxs[0]))
 # =================== END RULE-BASED SCORING ADD-ON ===================
-
